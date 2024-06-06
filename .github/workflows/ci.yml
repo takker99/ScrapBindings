@@ -16,3 +16,5 @@ jobs:
         run: deno lint
       - name: Run type check
         run: deno check --remote ./**/*.ts
+      - name: Run test
+        run: deno test
