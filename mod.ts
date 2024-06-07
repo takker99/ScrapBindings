@@ -3,19 +3,43 @@
 /// <reference lib="dom" />
 
 import {
+  DisallowedModifierError,
+  DuplicateModifierError,
+  InvalidKeyError,
   normalize,
   parseSequence,
   Result,
   stringify,
+  UnknownModifierError,
 } from "./deps/vim-like-key-notation.ts";
 import { createDebug } from "./deps/debug-js.ts";
 export { setDebugMode } from "./deps/debug-js.ts";
 export type { Result };
+export type {
+  DisallowedModifierError,
+  DuplicateModifierError,
+  InvalidKeyError,
+  UnknownModifierError,
+};
 
 const logger = createDebug("ScrapBindings:mod.ts");
 
 export type Command = (e: KeyboardEvent) => void;
 export type KeyBindings = Record<string, Command> | Map<string, Command>;
+/** errors caused when key bindings to register on {@link Mousetrap.prototype.bind} are invalid.
+ *
+ * The key of the map is the key sequence, and the value is an array of errors about the key sequence.
+ */
+export type BindingError = Map<
+  string,
+  (
+    | InvalidSequenceError
+    | InvalidKeyError
+    | DisallowedModifierError
+    | DuplicateModifierError
+    | UnknownModifierError
+  )[]
+>;
 
 /**
  * Represents the configuration options for {@link Mousetrap}.
@@ -69,7 +93,7 @@ export class Mousetrap {
    * @param keyBindings A map of key bindings to commands.
    * @returns an array of error messages
    */
-  bind(keyBindings: KeyBindings): [string, string][];
+  bind(keyBindings: KeyBindings): BindingError;
   /** bind a key bindings
    *
    * The key sequence is in the Vim-like key notation format.
@@ -78,17 +102,19 @@ export class Mousetrap {
    * @param command a command to bind
    * @returns an array of error messages
    */
-  bind(sequence: string, command: Command): [string, string][];
-  bind(sequence: string | KeyBindings, command?: Command): [string, string][] {
-    const commands = checkKeyBindings(
+  bind(sequence: string, command: Command): BindingError;
+  bind(sequence: string | KeyBindings, command?: Command): BindingError {
+    const result = checkKeyBindings(
       typeof sequence === "string"
         ? Object.fromEntries([[sequence, command!]])
         : sequence,
     );
-    if (Array.isArray(commands)) {
-      logger.error("Invalid key bindings", commands);
-      return commands;
+    if (!result.ok) {
+      logger.error("Invalid key bindings", result.value);
+      return result.value;
     }
+
+    const commands = result.value;
     for (const [sequence, command] of commands) {
       this.bindings.set(sequence, command);
       if (sequence.startsWith(this.currentSequence)) {
@@ -97,7 +123,7 @@ export class Mousetrap {
     }
     logger.debug("Binded the following commands:", commands);
     this.emitChange();
-    return [];
+    return new Map();
   }
 
   unbind(...keys: string[]): void {
@@ -228,12 +254,28 @@ export class Mousetrap {
   };
 }
 
+export interface InvalidSequenceError {
+  name: "InvalidSequenceError";
+  message: "cannot parse the sequence";
+}
+const invalidSequenceError: InvalidSequenceError = {
+  name: "InvalidSequenceError",
+  message: "cannot parse the sequence",
+};
+
 const checkKeyBindings = (
   keyBindings: KeyBindings,
-):
-  | Map<string, Command>
-  | [string, string][] => {
-  const errors: [string, string][] = [];
+): Result<Map<string, Command>, BindingError> => {
+  const errorMap = new Map<
+    string,
+    (
+      | InvalidSequenceError
+      | InvalidKeyError
+      | DisallowedModifierError
+      | DuplicateModifierError
+      | UnknownModifierError
+    )[]
+  >();
   const normalizedCommands = new Map<string, Command>();
 
   for (
@@ -243,14 +285,18 @@ const checkKeyBindings = (
   ) {
     const keys = parseSequence(sequence);
     if (!keys) {
-      errors.push([sequence, "cannot parse the sequence"]);
+      const errors = errorMap.get(sequence) ?? [];
+      errors.push({ ...invalidSequenceError });
+      errorMap.set(sequence, errors);
       continue;
     }
     let normalizedSequence = "";
     for (const key of keys) {
       const result = normalize(key);
       if (!result.ok) {
-        errors.push([sequence, result.value.message]);
+        const errors = errorMap.get(sequence) ?? [];
+        errors.push(result.value);
+        errorMap.set(sequence, errors);
         continue;
       }
       normalizedSequence += result.value;
@@ -258,5 +304,7 @@ const checkKeyBindings = (
     normalizedCommands.set(normalizedSequence, command);
   }
 
-  return errors.length > 0 ? errors : normalizedCommands;
+  return errorMap.size > 0
+    ? { ok: false, value: errorMap }
+    : { ok: true, value: normalizedCommands };
 };
