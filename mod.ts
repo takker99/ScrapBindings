@@ -198,7 +198,7 @@ export class Mousetrap {
     const vimKey = stringify(e);
     if (!vimKey) return;
     clearTimeout(this.timer);
-    if (e.isComposing || e.key === "Process") {
+    if (e.isComposing) {
       this.backToInitial();
       return;
     }
