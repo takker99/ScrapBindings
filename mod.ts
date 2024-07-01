@@ -53,7 +53,7 @@ export interface MousetrapOptions {
  *
  * @example
  * ```ts
- * const bindings = new ScrapBindings(window, {
+ * const bindings = new Mousetrap(window, {
  *  onSequenceUpdate: (sequence) => console.log(sequence),
  * flushInterval: 1000,
  * });
@@ -70,9 +70,16 @@ export interface MousetrapOptions {
  * bindings.bind("<C-r>", () => console.log("redo"));
  *  ```
  */
+/**
+ * Represents a Mousetrap object that binds key sequences to commands.
+ */
 export class Mousetrap {
+  /**
+   * Creates a new Mousetrap instance.
+   * @param target The target element to bind the key sequences to.
+   * @param options The options for the Mousetrap instance.
+   */
   constructor(
-    /** The target element to bind the key sequences to. */
     private target: Omit<EventTarget, "dispatchEvent">,
     options?: MousetrapOptions,
   ) {
@@ -80,25 +87,23 @@ export class Mousetrap {
     this.flushInterval = options?.flushInterval ?? 1000;
   }
 
-  /** bind a set of key bindings
-   *
-   * The key bindings are a map of key sequences to commands.
+  /** Binds a set of key bindings to commands.
    *
    * The key sequences are in the Vim-like key notation format.
    *
    * @param keyBindings A map of key bindings to commands.
-   * @returns an array of error messages
+   * @returns A map of error messages for each key binding.
    */
   bind(keyBindings: KeyBindings): Map<string, BindingError[]>;
-  /** bind a key bindings
+
+  /** Binds a key sequence to a command.
    *
-   * The key sequence is in the Vim-like key notation format.
-   *
-   * @param sequence a key sequence
-   * @param command a command to bind
-   * @returns an array of error messages
+   * @param sequence A key sequence.
+   * @param command A command to bind.
+   * @returns A map of error messages for the key binding.
    */
   bind(sequence: string, command: Command): Map<string, BindingError[]>;
+
   bind(
     sequence: string | KeyBindings,
     command?: Command,
@@ -135,6 +140,10 @@ export class Mousetrap {
     return errorMap;
   }
 
+  /**
+   * Unbinds the specified key sequences.
+   * @param sequences The key sequences to unbind.
+   */
   unbind(...sequences: string[]): void {
     for (const sequence of sequences) {
       const result = normalizeSequence(sequence);
@@ -146,10 +155,14 @@ export class Mousetrap {
     this.emitChange();
   }
 
+  /**
+   * Resets the Mousetrap instance by clearing all key bindings.
+   */
   reset(): void {
     this.bindings.clear();
     this.emitChange();
   }
+
   private bindings = new Map<string, Command>();
 
   /** A callback called whenever the sequence is updated. */
@@ -215,17 +228,17 @@ export class Mousetrap {
     logger.debug(`${size} candidates: ${[...this.filtered.keys()].join(", ")}`);
     if (size > 0) this.prevBestMatchCommand = bestMatchCommand;
     if (this.prevBestMatchCommand && size < 2) {
-      // 完全一致するコマンド`bestMatchCommand`だけ残ったら、それを実行する
-      // 前回のターンで完全一致したコマンドと部分一致したコマンドがあり、今回のターンで前回部分一致したコマンドが全て外れたときは、前回完全一致したコマンド`this.prevBestMatchCommand`を実行する
-      // その際、今回のターンの`KeyboardEvent`は次回のターンで再利用する
-      // 例
-      // 1. 前回のターン
+      // Execute the best match command if there is only one command that matches completely.
+      // If there was a command that matched completely in the previous turn and a command that matched partially in the previous turn, and in this turn all the commands that matched partially in the previous turn are no longer matched, execute the command that matched completely in the previous turn (`this.prevBestMatchCommand`).
+      // In this case, the `KeyboardEvent` of this turn will be reused in the next turn.
+      // Example:
+      // 1. Previous turn:
       //   - sequence: "d"
       //   - filtered: ["d","dd"]
-      // 2. 今回のターン
+      // 2. Current turn:
       //   - sequence: "da"
       //   - filtered: []
-      // このときは"d"を実行し、状態をリセットしたあと、次回のターンで"a"が入力されたことにする
+      // In this case, execute "d", reset the state, and pretend that "a" was entered in the next turn.
       this.prevBestMatchCommand();
       if (size === 0) {
         this.handleKeydown(e);
@@ -234,16 +247,16 @@ export class Mousetrap {
       return;
     }
     if (size === 0) {
-      // 候補がなければ初期状態に戻す
+      // If there are no candidates, go back to the initial state.
       this.backToInitial();
       return;
     }
-    // コマンドを絞り込めきれない場合は、常にdefaultの挙動を打ち消しておく
+    // Always prevent the default behavior if the command cannot be narrowed down, and stop the event propagation.
     e.preventDefault();
     e.stopPropagation();
     this.timer = setTimeout(
-      // 一定時間経っても入力がないときは、初期状態に戻す
-      // もし完全一致するコマンドがあれば、そのコマンドを実行する
+      // If there is no input for a certain period of time, go back to the initial state.
+      // If there is a command that matches completely, execute that command.
       this.prevBestMatchCommand ?? this.backToInitial,
       this.flushInterval,
     );
